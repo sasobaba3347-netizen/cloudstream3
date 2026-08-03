@@ -1,89 +1,258 @@
-name: "Otonom AI Kodu Gelistirici"
+name: "Otonom AI Kod Gelistirici"
+
+# ============================================================================
+# NASIL CALISIR
+# ----------------------------------------------------------------------------
+# 1) Bir issue'ya "ai-code" etiketi eklendiginde (veya issue bu etiketle
+#    acildiginda) tetiklenir. Elle test etmek icin Actions sekmesinden
+#    "Run workflow" ile de (workflow_dispatch) calistirilabilir.
+# 2) main'den "ai/issue-<numara>" adinda ayri bir dal olusturur, Aider + 
+#    Gemini 2.5 Pro ile o dalda degisiklik yapar.
+# 3) Degisiklikleri reponun gercek PR CI'siyla ayni komutla derleyip
+#    dogrular (bkz. pull_request.yml). Derleme aider'in kendi
+#    --test-cmd/--auto-test dongusune de bagli, yani basit hatalari
+#    kendi kendine duzeltmeye calisir.
+# 4) Basarili olursa dali push'lar ve otomatik PR acar; basarisiz olursa
+#    main'e hicbir sey dokunmadan issue'ya hata logunu yorum olarak yazar.
+#
+# GUVENLIK NOTU: Tetikleyici bilerek sadece "ai-code" etiketine baglandi.
+# GitHub'da issue'lara etiket eklemek zaten sadece write/triage yetkisi
+# olanlara acik oldugu icin, bu is akisini disaridan rastgele biri
+# (public repo'da issue acan herkes) tetikleyemez. Bu satiri gevsetmeyin.
+# ============================================================================
 
 on:
   issues:
     types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "AI'nin calisacagi issue numarasi"
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: ai-developer-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: true
 
 jobs:
   ai_developer:
-    if: contains(github.event.issue.labels.*.name, 'ai-code') || github.event.action == 'opened'
+    # Sadece: elle tetikleme YA DA "ai-code" etiketi az once eklendi YA DA
+    # issue zaten bu etiketle acildi. Rastgele "opened" tetiklemesi YOK.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'ai-code') ||
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'ai-code'))
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Repoyu Klonla
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Java JDK 17 Kur (Gradle için)
-        uses: actions/setup-java@v4
+      - name: Java JDK 17 Kur
+        uses: actions/setup-java@v5
         with:
-          distribution: 'zulu'
-          java-version: '17'
+          distribution: temurin
+          java-version: 17
+
+      - name: Gradle Kurulumu (Cache ile)
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Python Kur
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Depodaki ZIP Dosyasını Otomatik Çıkar ve Temizle
+      - name: Git Kullanicisini Ayarla
         run: |
           git config --global user.name "AI-Developer-Bot"
           git config --global user.email "ai-bot@github.com"
-          
-          # Depoda zip dosyası var mı kontrol et
+
+      - name: Issue Numarasini Belirle
+        run: |
+          NUM="${{ github.event.issue.number || inputs.issue_number }}"
+          echo "NUM=$NUM" >> "$GITHUB_ENV"
+          echo "BRANCH=ai/issue-$NUM" >> "$GITHUB_ENV"
+
+      - name: Issue Basligini ve Govdesini Cek
+        # github.event.issue her zaman guvenilir olmayabilir (ozellikle
+        # workflow_dispatch'te hic yok), bu yuzden GitHub API'den taze
+        # cekiyoruz. Dosyaya yaziyoruz ki basliktaki/govdedeki ozel
+        # karakterler shell/YAML enterpolasyonunu bozmasin.
+        run: |
+          gh issue view "$NUM" --repo "$GITHUB_REPOSITORY" --json title --jq .title > issue_title.txt
+          gh issue view "$NUM" --repo "$GITHUB_REPOSITORY" --json body --jq .body > issue_body.txt
+
+      - name: Depodaki ZIP Dosyasini Otomatik Cikar ve Temizle
+        # Not: Proje zaten duzgun sekilde acilmis durumda; bu adim artik
+        # cogunlukla no-op calisir. Ileride repo koklerine yeni bir zip
+        # birakirsaniz diye korundu, zararsizdir.
+        run: |
           ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
           if [ -n "$ZIP_FILE" ]; then
-            echo "ZIP dosyası bulundu: $ZIP_FILE. Çıkarılıyor..."
-            unzip -o "$ZIP_FILE"
+            echo "ZIP dosyasi bulundu: $ZIP_FILE. Cikariliyor..."
+            mkdir -p temp_extracted
+            unzip -o "$ZIP_FILE" -d temp_extracted
             rm -f "$ZIP_FILE"
-            git add .
-            git commit -m "chore: ZIP dosyasi otomatik olarak klasore cikarildi" || echo "Zaten çıkarılmış."
+            find temp_extracted -name ".git" -exec rm -rf {} +
+
+            SUBFOLDER=$(ls -A temp_extracted | head -n 1)
+            COUNT=$(ls -A temp_extracted | wc -l)
+            if [ "$COUNT" -eq 1 ] && [ -d "temp_extracted/$SUBFOLDER" ]; then
+              cp -r temp_extracted/"$SUBFOLDER"/* . 2>/dev/null || true
+            else
+              cp -r temp_extracted/* . 2>/dev/null || true
+            fi
+            rm -rf temp_extracted
+
+            git add -A
+            git commit -m "chore: ZIP dosyasi otomatik cikartildi" || echo "Zaten cikarilmis."
             git push origin main || echo "Push yapilamadi."
           else
             echo "ZIP dosyasi bulunamadi, kodlar zaten acikta."
           fi
 
+      - name: AI Calisma Dalini Olustur
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+          # Ayni issue icin onceki bir AI denemesi varsa uzerine yazariz;
+          # bu dal tamamen bot'a ait, insanlarin uzerinde calismadigi
+          # varsayilir.
+          git checkout -B "$BRANCH"
+          echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
       - name: Aider AI Ajanini Kur
         run: |
           python -m pip install --upgrade pip
-          pip install aider-chat
+          pip install --break-system-packages aider-chat
 
-      - name: AI Görevi Çalıştırsın
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
+      - name: Aider'in Gormemesi Gereken Dosyalari Isaretle
+        # AI, kendi calisma kurallarini/CI'sini degistiremesin diye
+        # .github/ tamamen kapsam disi tutuluyor.
         run: |
-          chmod +x gradlew || true
-
-          # Talimat ve Kurallar Dosyasını Oluştur
-          cat << 'EOF' > system_prompt.txt
-          SABİT MİMARİ VE KODLAMA KURALLARI:
-          1. Bu proje bir Cloudstream (Android/Kotlin) eklentisi/fork'udur.
-          2. Tüm kod değişiklikleri Cloudstream'in mevcut mimarisine, MainAPI, TvType, SearchResponse, ExtractorLink ve tema/UI yapılarına %100 uyumlu olmalıdır.
-          3. Sadece Kotlin (.kt) ve gerekli UI/XML yapılandırma dosyalarını güncelle.
-          4. Kotlin null-safety kurallarına uymak zorundasın. Asla güvensiz '!!' kullanma, safe call ('?.') ve Elvis operatörünü ('?:') tercih et.
-          5. Var olmayan R.color veya R.drawable ID'leri uydurma! Sadece projede var olan veya senin eklediğin XML kaynaklarını kullan.
+          cat << 'EOF' > .aiderignore
+          .github/
+          app/debug.keystore
           EOF
 
-          # Issue Detaylarını Dosyaya Ekle
-          echo -e "\n=== GÖREV TANIMI ===" >> system_prompt.txt
-          echo "GÖREV BAŞLIĞI: $ISSUE_TITLE" >> system_prompt.txt
-          echo -e "\nGÖREV DETAYLARI:\n$ISSUE_BODY" >> system_prompt.txt
+      - name: Sistem Talimati Dosyasini Olustur
+        run: |
+          cat << 'EOF' > system_prompt.txt
+          SABIT MIMARI VE KODLAMA KURALLARI:
+          1. Bu proje bir Cloudstream (Android/Kotlin) eklentisi/fork'udur.
+          2. Tum kod degisiklikleri Cloudstream'in mevcut mimarisine, MainAPI,
+             TvType, SearchResponse, ExtractorLink ve tema/UI yapilarina
+             %100 uyumlu olmalidir.
+          3. Sadece Kotlin (.kt) ve gerekli UI/XML yapilandirma dosyalarini
+             guncelle. .github/ altindaki hicbir dosyaya dokunma.
+          4. Kotlin null-safety kurallarina uymak zorundasin. Asla guvensiz
+             '!!' kullanma, safe call ('?.') ve Elvis operatorunu ('?:')
+             tercih et.
+          5. Var olmayan R.color veya R.drawable ID'leri uydurma! Sadece
+             projede var olan veya senin eklediğin XML kaynaklarini kullan.
+          6. Degisikliklerin `./gradlew assemblePrereleaseDebug` ile
+             derlenebilir olmasi sart. Derleme hatasi verirsen kendi
+             kendine duzelt.
+          EOF
 
-          # Aider'ı Doğru Model (gemini-2.5-pro) İle Çalıştır
+          echo "" >> system_prompt.txt
+          echo "=== GOREV TANIMI ===" >> system_prompt.txt
+          echo "GOREV BASLIGI: $(cat issue_title.txt)" >> system_prompt.txt
+          echo "" >> system_prompt.txt
+          echo "GOREV DETAYLARI:" >> system_prompt.txt
+          cat issue_body.txt >> system_prompt.txt
+
+      - name: AI Gorevi Calistirsin (Aider + Gemini)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          chmod +x gradlew || true
           aider \
             --model gemini/gemini-2.5-pro \
             --message-file system_prompt.txt \
-            --yes-always
+            --yes-always \
+            --no-suggest-shell-commands \
+            --no-analytics \
+            --test-cmd "./gradlew assemblePrereleaseDebug" \
+            --auto-test
 
-      - name: Değişiklikleri Depoya Push Et
+      - name: Degisiklik Var mi Kontrol Et
         run: |
-          git add .
-          git commit -m "refactor: AI tarafindan otomatik kod guncellemesi" || echo "Değişiklik yok."
-          git push origin main
+          git add -A
+          git commit -m "refactor: AI tarafindan otomatik kod guncellemesi" || true
+          if git diff --quiet "$BASE_SHA" HEAD; then
+            echo "HAS_CHANGES=false" >> "$GITHUB_ENV"
+          else
+            echo "HAS_CHANGES=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Nihai Derleme Dogrulamasi
+        if: env.HAS_CHANGES == 'true'
+        id: verify
+        continue-on-error: true
+        # Repo'nun gercek pull_request.yml CI'siyla ayni komut: bu gecerse
+        # normal PR kontrolunuz de buyuk ihtimalle gecer. Cikti, hata
+        # ozetini issue'ya yazabilmek icin dosyaya da kaydediliyor.
+        run: ./gradlew assemblePrereleaseDebug lint check 2>&1 | tee build_log.txt
+
+      - name: Basarisiz Derleme Logunu Kaydet
+        if: env.HAS_CHANGES == 'true' && steps.verify.outcome == 'failure'
+        run: |
+          {
+            echo "BUILD_LOG<<__LOG_EOF__"
+            tail -c 3000 build_log.txt
+            echo ""
+            echo "(Tam log icin Actions calistirma sayfasina bakin)"
+            echo "__LOG_EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Dali Push Et
+        if: env.HAS_CHANGES == 'true'
+        run: git push --force origin "$BRANCH"
+
+      - name: Basarili ise PR Ac
+        if: env.HAS_CHANGES == 'true' && steps.verify.outcome == 'success'
+        run: |
+          if ! gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$BRANCH" \
+              --title "AI: $(cat issue_title.txt) (#$NUM)" \
+              --body "Bu PR, #$NUM numarali issue uzerine **Gemini 2.5 Pro (aider)** tarafindan otomatik olusturuldu.
+
+          - Derleme dogrulamasi (\`assemblePrereleaseDebug lint check\`) basariyla gecti.
+          - AI-POLICY.md geregi: bu kod insan tarafindan **henuz test edilmedi**, merge etmeden once manuel inceleme/test yapin.
+
+          Closes #$NUM"
+          fi
+          gh issue comment "$NUM" --repo "$GITHUB_REPOSITORY" --body "✅ AI degisiklikleri hazirladi ve derleme dogrulamasindan gecti. Inceleme icin PR acildi/guncellendi: dal \`$BRANCH\`. Merge etmeden once lutfen test edin."
+
+      - name: Basarisiz ise Issue'ya Bildir
+        if: env.HAS_CHANGES == 'true' && steps.verify.outcome == 'failure'
+        run: |
+          gh issue comment "$NUM" --repo "$GITHUB_REPOSITORY" --body "⚠️ AI degisiklik yapti ama derleme dogrulamasi (\`assemblePrereleaseDebug lint check\`) basarisiz oldu. main dalina hicbir sey push edilmedi. Denemeyi \`$BRANCH\` dalinda inceleyebilirsiniz.
+
+          <details><summary>Log ozeti</summary>
+
+          \`\`\`
+          $BUILD_LOG
+          \`\`\`
+          </details>"
+          exit 1
+
+      - name: Degisiklik Yoksa Bildir
+        if: env.HAS_CHANGES == 'false'
+        run: |
+          gh issue comment "$NUM" --repo "$GITHUB_REPOSITORY" --body "ℹ️ AI bu issue icin herhangi bir kod degisikligi yapmadi."
