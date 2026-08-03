@@ -1,0 +1,37 @@
+SABİT MİMARİ VE KODLAMA KURALLARI:
+1. Bu proje bir Cloudstream (Android/Kotlin) eklentisi/fork'udur.
+2. Tüm kod değişiklikleri Cloudstream'in mevcut mimarisine, MainAPI, TvType, SearchResponse, ExtractorLink ve tema/UI yapılarına %100 uyumlu olmalıdır.
+3. Sadece Kotlin (.kt) ve gerekli UI/XML yapılandırma dosyalarını güncelle.
+4. Kotlin null-safety kurallarına uymak zorundasın. Asla güvensiz '!!' kullanma, safe call ('?.') ve Elvis operatörünü ('?:') tercih et.
+5. Diğer çalışan eklentileri veya Gradle konfigürasyonlarını bozma.
+
+=== GÖREV TANIMI ===
+GÖREV BAŞLIĞI: #1 Apple TV UI Redesign...
+
+GÖREV DETAYLARI:
+🎨 UI/UX REDESIGN: Apple TV Minimalist Style, Text-Only Glass Navigation & Focus Overhaul
+Projenin arayüzünü (UI) ve TV kumandası kullanıcı deneyimini (UX) Apple TV standartlarına getirmek istiyoruz. Lütfen aşağıdaki 5 ana modülde değişiklikleri yapın:
+
+1. Text-Only Glassmorphism Navigation Bar (Cam Efektli Sadece Yazılı Alt Menü)
+Bottom Navigation Bar ikonlarını KESİNLİKLE KALDIRIN. Sadece metinler (Anasayfa, Keşfet, Ayarlar vb.) kalsın.
+Arka planı tam mat siyah/beyaz yerine yarı şeffaf (frosted glass/blur) yapın (#121212 %30 Opacity + Gaussian Blur veya Android RenderEffect).
+Tipografi: Seçili olmayan kelimeler yarı şeffaf gri (#8E8E93), seçili olan kelime ise net, hafif kalın (Bold) ve yumuşak parlamalı olsun.
+2. D-Pad Circular Focus Navigation (Sıçramalı Odaklama)
+Nav Bar ekranın altında olduğu için navigasyon çilesini çözün:
+İçeriğin (Anasayfa/Liste) EN ÜSTÜNDEKİ elemandayken kumandada YUKARI (DPAD_UP) tuşuna basıldığında, odak (focus) direkt ekranın altındaki Navigation Bar'a atlasın.
+Aynı şekilde Nav Bar'dayken AŞAĞI (DPAD_DOWN) tuşuna basıldığında odağı anasayfanın ilk öğesine getirin. Ekranı baştan aşağı kaydırma zorunluluğunu kaldırın.
+3. Apple TV Style Smooth Focus Animation
+Mevcut kötü ve keskin odak sınırlarını silin.
+Yeni Odak Mantığı:
+Odaklanan kart/buton yumuşak bir şekilde 1.08x oranında büyüsün (Scale X/Y).
+Odaklanan elemanın etrafına yumuşak parlama (Elevated Glow Shadow) ekleyin.
+Geçiş animasyonu süreksiz olmamalı, 250ms Interpolator / EaseInOut yumuşaklığında olmalıdır.
+4. Theme Cleanup & Contrast Fix (Temaların Temizlenmesi)
+Diğer tüm göz yoran renkli temaları silin/devre dışı bırakın. Sadece 2 tema kalsın:
+Luxury Dark (Varsayılan): Derin OLED Siyahı (#0B0B0C), Koyu Titanyum Grisi.
+Minimal Light (Açık Tema): Yumuşak Krem/Açık Gri (#F2F2F7).
+AÇIK TEMA KONTRAST DÜZELTMESİ: Açık temadaki tüm metin (TextView/Title), açıklama ve ikon renklerini KESİNLİKLE #0F0F0F (Koyu Siyah) ve #3C3C43 (İkincil Koyu Gri) yapın. TV ekranında uzaktan okunabilirliği maksimuma çıkarın.
+AÇIK TEMA VURGU RENGİ (ACCENT COLOR): TV ekranında göz yormayacak, lüks ve yüksek kontrastlı en ideal vurgu rengini (örn. Deep Amber, Warm Champagne veya Slate Charcoal) kendiniz seçip uygulayın.
+Lütfen tüm değişiklikleri Kotlin, Android XML / Jetpack Compose standartlarına tam uyumlu ve sorunsuz derlenebilir şekilde projeye işleyin.
+
+
