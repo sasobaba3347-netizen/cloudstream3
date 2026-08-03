@@ -11,6 +11,8 @@ jobs:
     permissions:
       contents: write
       issues: write
+      pull-requests: write
+
     steps:
       - name: Repoyu Klonla
         uses: actions/checkout@v4
@@ -30,19 +32,32 @@ jobs:
       - name: AI Görevi Çalıştırsın
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           git config --global user.name "AI-Developer-Bot"
           git config --global user.email "ai-bot@github.com"
-          
-          # Issue içeriğini al
-          ISSUE_TITLE="${{ github.event.issue.title }}"
-          ISSUE_BODY="${{ github.event.issue.body }}"
-          FULL_PROMPT="GÖREV: $ISSUE_TITLE\n\nDETAYLAR:\n$ISSUE_BODY"
-          
-          # Aider'ı Gemini Pro ile otomatik çalıştır
-          aider --model gemini/gemini-1.5-pro-latest --message "$FULL_PROMPT" --yes-always
+
+          # Talimat ve Kurallar Dosyasını Oluştur
+          cat << 'EOF' > system_prompt.txt
+          SABİT MİMARİ VE KODLAMA KURALLARI:
+          1. Bu proje bir Cloudstream (Android/Kotlin) eklentisi/fork'udur.
+          2. Tüm kod değişiklikleri Cloudstream'in mevcut mimarisine, MainAPI, TvType, SearchResponse, ExtractorLink ve tema/UI yapılarına %100 uyumlu olmalıdır.
+          3. Sadece Kotlin (.kt) ve gerekli UI/XML yapılandırma dosyalarını güncelle.
+          4. Kotlin null-safety kurallarına uymak zorundasın. Asla güvensiz '!!' kullanma, safe call ('?.') ve Elvis operatörünü ('?:') tercih et.
+          5. Diğer çalışan eklentileri veya Gradle konfigürasyonlarını bozma.
+          EOF
+
+          # Issue Detaylarını Dosyaya Ekle
+          echo -e "\n=== GÖREV TANIMI ===" >> system_prompt.txt
+          echo "GÖREV BAŞLIĞI: $ISSUE_TITLE" >> system_prompt.txt
+          echo -e "\nGÖREV DETAYLARI:\n$ISSUE_BODY" >> system_prompt.txt
+
+          # Aider'ı Gemini 1.5 Pro İle Çalıştır
+          aider --model gemini/gemini-1.5-pro --message-file system_prompt.txt --auto-commits --yes-always
 
       - name: Değişiklikleri Depoya Push Et
         run: |
+          git add .
+          git commit -m "refactor: AI tarafindan otomatik kod guncellemesi" || echo "Değişiklik yok."
           git push origin main
-          
