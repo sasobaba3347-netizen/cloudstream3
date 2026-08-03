@@ -19,10 +19,34 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Java JDK 17 Kur (Gradle için)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
       - name: Python Kur
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      - name: Depodaki ZIP Dosyasını Otomatik Çıkar ve Temizle
+        run: |
+          git config --global user.name "AI-Developer-Bot"
+          git config --global user.email "ai-bot@github.com"
+          
+          # Depoda zip dosyası var mı kontrol et
+          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "ZIP dosyası bulundu: $ZIP_FILE. Çıkarılıyor..."
+            unzip -o "$ZIP_FILE"
+            rm -f "$ZIP_FILE"
+            git add .
+            git commit -m "chore: ZIP dosyasi otomatik olarak klasore cikarildi" || echo "Zaten çıkarılmış."
+            git push origin main || echo "Push yapilamadi."
+          else
+            echo "ZIP dosyasi bulunamadi, kodlar zaten acikta."
+          fi
 
       - name: Aider AI Ajanini Kur
         run: |
@@ -35,8 +59,7 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          git config --global user.name "AI-Developer-Bot"
-          git config --global user.email "ai-bot@github.com"
+          chmod +x gradlew || true
 
           # Talimat ve Kurallar Dosyasını Oluştur
           cat << 'EOF' > system_prompt.txt
@@ -45,7 +68,7 @@ jobs:
           2. Tüm kod değişiklikleri Cloudstream'in mevcut mimarisine, MainAPI, TvType, SearchResponse, ExtractorLink ve tema/UI yapılarına %100 uyumlu olmalıdır.
           3. Sadece Kotlin (.kt) ve gerekli UI/XML yapılandırma dosyalarını güncelle.
           4. Kotlin null-safety kurallarına uymak zorundasın. Asla güvensiz '!!' kullanma, safe call ('?.') ve Elvis operatörünü ('?:') tercih et.
-          5. Diğer çalışan eklentileri veya Gradle konfigürasyonlarını bozma.
+          5. Var olmayan R.color veya R.drawable ID'leri uydurma! Sadece projede var olan veya senin eklediğin XML kaynaklarını kullan.
           EOF
 
           # Issue Detaylarını Dosyaya Ekle
@@ -53,8 +76,11 @@ jobs:
           echo "GÖREV BAŞLIĞI: $ISSUE_TITLE" >> system_prompt.txt
           echo -e "\nGÖREV DETAYLARI:\n$ISSUE_BODY" >> system_prompt.txt
 
-          # Aider'ı Gemini 1.5 Pro İle Çalıştır
-          aider --model gemini/gemini-1.5-pro --message-file system_prompt.txt --auto-commits --yes-always
+          # Aider'ı Doğru Model (gemini-2.5-pro) İle Çalıştır
+          aider \
+            --model gemini/gemini-2.5-pro \
+            --message-file system_prompt.txt \
+            --yes-always
 
       - name: Değişiklikleri Depoya Push Et
         run: |
