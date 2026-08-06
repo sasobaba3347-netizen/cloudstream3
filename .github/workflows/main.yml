@@ -3,7 +3,7 @@ name: Build APK from Zip
 on:
   push:
     paths:
-      - '*.zip'
+      - '**/*.zip'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +41,15 @@ jobs:
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+        working-directory: ${{ steps.extract.outputs.project_dir }}
+
+      - name: Initialize dummy git repo (required by app's generateGitHash task)
+        run: |
+          git init -q
+          git config user.email "ci@example.com"
+          git config user.name "CI"
+          git add -A
+          git commit -q -m "CI build" --allow-empty
         working-directory: ${{ steps.extract.outputs.project_dir }}
 
       - name: Build debug APK
